@@ -7,10 +7,10 @@ set -e
 # Configuration
 VPS_HOST="45.13.225.105"
 VPS_USER_password="ukcq7H1hIQ7tSwFlc9TB"
-PROJECT_DIR="/path/to/project/on/vps"
+PROJECT_DIR="/usr/to/project/on/vps"
 REMOTE_PYTHON="/usr/bin/python3"
 
-echo "🚀 Deploying Ultimate Recon Framework to VPS..."
+echo "🚀 Deploying Ultimate  Framework to VPS.."
 
 # 1. Create project directory on VPS
 echo "📁 Creating project directory..."
