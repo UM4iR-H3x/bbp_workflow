@@ -6,14 +6,14 @@ import asyncio
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import List, Dict, Optional, Set
+from typing import List, Dict, Optional, Set, Callable
 import json
 import re
 
 from utils.logger import get_logger, log_module_start, log_module_complete, log_error
-from utils.helpers import normalize_url, deduplicate_list, ensure_directory, extract_urls_from_text
+from utils.helpers import normalize_url, deduplicate_list, ensure_directory, extract_urls_from_text, safe_filename
 from utils.rate_limiter import get_rate_limiter
-from config.config import EXTERNAL_TOOLS, TMP_DIR, MAX_CONCURRENT_REQUESTS
+from config.config import EXTERNAL_TOOLS, TMP_DIR, MAX_CONCURRENT_REQUESTS, OUTPUT_DIR
 
 class URLCollector:
     """
@@ -27,7 +27,16 @@ class URLCollector:
         self.katana_path = EXTERNAL_TOOLS["katana"]
         self.waybackurls_path = EXTERNAL_TOOLS["waybackurls"]
         self.temp_dir = TMP_DIR / "url_collection"
+        self.urls_output_dir = OUTPUT_DIR / "urls"
         ensure_directory(self.temp_dir)
+        ensure_directory(self.urls_output_dir)
+    
+    def get_urls_file_path(self, target: str) -> Path:
+        """Get the output txt path for collected URLs for a target."""
+        safe = safe_filename(
+            target.replace("https://", "").replace("http://", "").strip("/").split("/")[0] or "target"
+        )
+        return self.urls_output_dir / f"{safe}_urls.txt"
     
     async def collect_urls_gau(self, target: str) -> List[str]:
         """
@@ -269,6 +278,79 @@ class URLCollector:
             results[target] = urls
         
         return results
+    
+    async def collect_urls_all_hosts_by_tool(
+        self,
+        live_hosts: List[str],
+        output_txt_path: Path,
+        *,
+        on_tool_start: Optional[Callable[[str], None]] = None,
+        on_tool_done: Optional[Callable[[str, int], None]] = None,
+    ) -> List[str]:
+        """
+        Run each URL tool on ALL subdomains, then combine and deduplicate.
+        Order: 1) gau (all hosts) -> save to file
+               2) waybackurls (all hosts) -> append to same file
+               3) katana (all hosts) -> append to same file
+               4) deduplicate and overwrite file with unique URLs.
+        
+        Returns:
+            Deduplicated list of all URLs.
+        """
+        if not live_hosts:
+            output_txt_path.write_text("", encoding="utf-8")
+            return []
+        
+        all_urls: List[str] = []
+        
+        # 1) GAU on all subdomains
+        if on_tool_start:
+            on_tool_start("gau")
+        for host in live_hosts:
+            urls = await self.collect_urls_gau(host)
+            all_urls.extend(urls)
+        with open(output_txt_path, "w", encoding="utf-8") as f:
+            for u in all_urls:
+                f.write(u.strip() + "\n")
+        if on_tool_done:
+            on_tool_done("gau", len(all_urls))
+        
+        # 2) Waybackurls on all subdomains (append)
+        if on_tool_start:
+            on_tool_start("waybackurls")
+        wayback_count = 0
+        for host in live_hosts:
+            urls = await self.collect_urls_waybackurls(host)
+            wayback_count += len(urls)
+            all_urls.extend(urls)
+            with open(output_txt_path, "a", encoding="utf-8") as f:
+                for u in urls:
+                    f.write(u.strip() + "\n")
+        if on_tool_done:
+            on_tool_done("waybackurls", wayback_count)
+        
+        # 3) Katana on all subdomains (append)
+        if on_tool_start:
+            on_tool_start("katana")
+        katana_count = 0
+        for host in live_hosts:
+            urls = await self.collect_urls_katana(host)
+            katana_count += len(urls)
+            all_urls.extend(urls)
+            with open(output_txt_path, "a", encoding="utf-8") as f:
+                for u in urls:
+                    f.write(u.strip() + "\n")
+        if on_tool_done:
+            on_tool_done("katana", katana_count)
+        
+        # 4) Deduplicate and overwrite file with unique URLs
+        unique_urls = deduplicate_list(all_urls)
+        with open(output_txt_path, "w", encoding="utf-8") as f:
+            for u in unique_urls:
+                f.write(u.strip() + "\n")
+        
+        self.logger.info(f"Total URLs after dedup: {len(unique_urls)}")
+        return unique_urls
     
     def verify_tool_installation(self, tool_name: str) -> bool:
         """

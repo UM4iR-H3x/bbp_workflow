@@ -114,6 +114,24 @@ class Printer:
         """Print webhook notification"""
         print(f"{Printer.MAGENTA}[📢] Webhook sent: {finding_type}{Printer.RESET}")
 
+    @staticmethod
+    def progress(message: str):
+        """
+        Print a single-line progress message (updates in-place).
+        Useful for scanning many URLs without spamming the terminal.
+        """
+        sys.stdout.write(f"\r{Printer.BLUE}[→] {message}{Printer.RESET}")
+        sys.stdout.flush()
+
+    @staticmethod
+    def progress_done(message: str = ""):
+        """Finish progress line and move to next line."""
+        if message:
+            sys.stdout.write(f"\r{Printer.GREEN}[✓] {message}{Printer.RESET}\n")
+        else:
+            sys.stdout.write("\n")
+        sys.stdout.flush()
+
 # Global printer instance
 _printer = None
 

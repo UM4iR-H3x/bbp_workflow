@@ -83,6 +83,67 @@ class DeadLinkChecker:
             else:
                 # Other errors might not indicate a dead link
                 return False, 0, f"Other error: {str(e)}"
+
+    async def check_url_status_detailed(self, url: str) -> Dict[str, any]:
+        """
+        More accurate status check for classification (200 vs 404) with GET fallback.
+        HEAD can be misleading (405) or blocked; this method tries to confirm.
+        """
+        # 1) Try HEAD
+        try:
+            head_resp = await self.rate_limiter.head(url, allow_redirects=True, timeout=REQUEST_TIMEOUT)
+            if head_resp is None:
+                return {"url": url, "status_code": 0, "method": "HEAD", "error": "Connection failed"}
+
+            head_status = head_resp.status
+
+            # Confirm hard-dead cases quickly
+            if head_status in (404, 410):
+                return {"url": url, "status_code": head_status, "method": "HEAD", "error": ""}
+
+            # If HEAD returns 200, treat as live
+            if head_status == 200:
+                return {"url": url, "status_code": 200, "method": "HEAD", "error": ""}
+
+            # HEAD sometimes not supported or blocked; fallback to GET for correctness
+            if head_status in (401, 403, 405):
+                get_dead, get_status, get_err, _ = await self.check_url_with_get(url)
+                return {"url": url, "status_code": get_status, "method": "GET", "error": get_err}
+
+            # For other statuses, do a lightweight GET confirmation when possible
+            get_dead, get_status, get_err, _ = await self.check_url_with_get(url)
+            if get_status:
+                return {"url": url, "status_code": get_status, "method": "GET", "error": get_err}
+
+            return {"url": url, "status_code": head_status, "method": "HEAD", "error": ""}
+
+        except Exception as e:
+            return {"url": url, "status_code": 0, "method": "HEAD", "error": str(e)}
+
+    async def check_urls_statuses(self, urls: List[str]) -> List[Dict[str, any]]:
+        """
+        Check multiple URLs and return full status results (not only "dead" ones).
+        Intended for accurate 200 vs 404 reporting.
+        """
+        if not urls:
+            return []
+
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+
+        async def check_one(u: str) -> Optional[Dict[str, any]]:
+            async with semaphore:
+                return await self.check_url_status_detailed(u)
+
+        tasks = [check_one(u) for u in urls]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        out = []
+        for r in results:
+            if isinstance(r, Exception):
+                continue
+            if r:
+                out.append(r)
+        return out
     
     async def check_urls_dead(self, urls: List[str]) -> List[Dict[str, any]]:
         """

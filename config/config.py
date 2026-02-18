@@ -121,10 +121,7 @@ IMPORTANT_JS_KEYWORDS = [
 
 # Discord webhook configuration - YOUR WEBHOOKS CONFIGURED
 DISCORD_WEBHOOKS = {
-    "js_leaks": "https://discord.com/api/webhooks/1442479921724264559/WujffNyMbxBPdq0GlGaFwyRz4Rk9zeQBh5FyB2pbDUF4ErO2z-jFJyAWEG3w8VmMTZcU",
-    "env_exposure": "https://discord.com/api/webhooks/1442480810312859750/8KLFkVUUkaAF8WdOeKrqGi1Wvz5JVCQ8WJVvVtAYvwtUwAeBP4U4VqDHYjIcqCOGXP6L",
-    "git_exposure": "https://discord.com/api/webhooks/1442480810312859750/8KLFkVUUkaAF8WdOeKrqGi1Wvz5JVCQ8WJVvVtAYvwtUwAeBP4U4VqDHYjIcqCOGXP6L",
-    "cors": "https://discord.com/api/webhooks/1442480607258218496/-NuD8z5N1KkFpjEl_V4CwjKSTHua8yNV85GK2yafd4HJim02TZlxaHG4j_NaDZJb8JnG"
+    "js_leaks": "https://discord.com/api/webhooks/1442479921724264559/WujffNyMbxBPdq0GlGaFwyRz4Rk9zeQBh5FyB2pbDUF4ErO2z-jFJyAWEG3w8VmMTZcU"
 }
 
 # Severity levels

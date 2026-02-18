@@ -79,6 +79,26 @@ class JSFileStorage:
         """
         if not urls:
             return None
+
+    def save_url_list_to_txt(self, urls: List[str], target: str, suffix: str) -> Optional[str]:
+        """
+        Save a URL list to output/js_urls/<target>_<suffix>.txt
+        (one URL per line, deduplicated + sorted).
+        """
+        if not urls:
+            return None
+        try:
+            safe_target = safe_filename(
+                target.replace("https://", "").replace("http://", "").strip("/").split("/")[0] or "target"
+            )
+            out_file = self.js_urls_list_dir / f"{safe_target}_{suffix}.txt"
+            with open(out_file, "w", encoding="utf-8") as f:
+                for u in sorted(set(u.strip() for u in urls if u and u.strip())):
+                    f.write(u + "\n")
+            return str(out_file)
+        except Exception as e:
+            log_error(self.logger, "JS Storage", f"save_url_list_to_txt:{suffix}", str(e))
+            return None
         try:
             safe_target = safe_filename(target.replace("https://", "").replace("http://", "").strip("/").split("/")[0] or "target")
             out_file = self.js_urls_list_dir / f"{safe_target}_js_urls.txt"

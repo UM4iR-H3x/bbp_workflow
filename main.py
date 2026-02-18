@@ -111,63 +111,114 @@ class ReconFramework:
             results["live_hosts"] = live_hosts
             self.printer.count("Live hosts", len(live_hosts), self.printer.GREEN)
             
-            # 3. URLs Gathering Phase
+            # 3. URLs Gathering Phase: gau (all hosts) -> waybackurls (all hosts) -> katana (all hosts) -> dedup, save to one file
             self.printer.phase("URLs Gathering Phase", target)
-            url_results = await self._collect_urls_with_progress(live_hosts)
-            all_urls = []
-            for host, urls in url_results.items():
-                all_urls.extend(urls)
-            self.printer.success(f"Got {len(all_urls)} total URLs")
+            urls_file = self.url_collector.get_urls_file_path(target)
+            all_urls = await self.url_collector.collect_urls_all_hosts_by_tool(
+                live_hosts,
+                urls_file,
+                on_tool_start=lambda name: self.printer.tool_running(name),
+                on_tool_done=lambda name, count: self.printer.tool_done(name, count),
+            )
+            
+            if not all_urls:
+                self.printer.warning("No URLs collected! Check if tools are working correctly.")
+                self.logger.warning(f"URLs file saved at: {urls_file}")
+                # Continue anyway - maybe JS files are already in the file
+            
+            self.printer.success(f"Got {len(all_urls)} total URLs (saved to {urls_file})")
             
             # 4. JS Files Phase
             self.printer.phase("JS Files Phase", target)
-            js_urls = self.js_filter.filter_js_urls(all_urls)
-            js_urls = self.deduplicator.deduplicate_urls(js_urls)
+            if not all_urls:
+                self.printer.warning("Skipping JS phase - no URLs to process")
+                js_urls = []
+            else:
+                self.printer.info(f"Filtering {len(all_urls)} URLs for JS files...")
+                js_urls = self.js_filter.filter_js_urls(all_urls)
+                js_urls = self.deduplicator.deduplicate_urls(js_urls)
             results["js_urls_file"] = self.js_storage.save_js_urls_to_txt(js_urls, target)
             results["js_urls"] = js_urls
             
             # Dead Link Check (identify 200 vs 404)
-            dead_js_results = await self.deadlink_checker.check_urls_dead(js_urls)
-            dead_js_urls = [result["url"] for result in dead_js_results if result.get("is_dead", False)]
-            live_js_urls = [url for url in js_urls if url not in dead_js_urls]
-            results["dead_js_urls"] = dead_js_urls
+            if js_urls:
+                self.printer.info(f"Validating {len(js_urls)} JS URLs (200 vs 404) ...")
+                status_results = await self.deadlink_checker.check_urls_statuses(js_urls)
+
+                live_js_urls = [r["url"] for r in status_results if r.get("status_code") == 200]
+                dead_js_urls = [r["url"] for r in status_results if r.get("status_code") in (404, 410)]
+                other_js = [r for r in status_results if r.get("status_code") not in (200, 404, 410)]
+
+                # Save exact lists to files so you can review
+                results["js_200_file"] = self.js_storage.save_url_list_to_txt(live_js_urls, target, "js_200")
+                results["js_404_file"] = self.js_storage.save_url_list_to_txt(dead_js_urls, target, "js_404")
+
+                results["dead_js_urls"] = dead_js_urls
+                results["js_status_other"] = other_js
+            else:
+                dead_js_urls = []
+                live_js_urls = []
+                results["dead_js_urls"] = []
             
             self.printer.count("Total JS files", len(js_urls))
             self.printer.count("Live JS files (200)", len(live_js_urls), self.printer.GREEN)
-            self.printer.count("Dead JS files (404)", len(dead_js_urls), self.printer.YELLOW)
+            self.printer.count("Dead JS files (404/410)", len(dead_js_urls), self.printer.YELLOW)
+            if js_urls and results.get("js_status_other"):
+                self.printer.count("Other status (401/403/405/etc)", len(results["js_status_other"]), self.printer.YELLOW)
+                self.printer.info("Saved 200/404 lists to:")
+                if results.get("js_200_file"):
+                    self.printer.info(f"  200 JS: {results['js_200_file']}")
+                if results.get("js_404_file"):
+                    self.printer.info(f"  404 JS: {results['js_404_file']}")
             
             # 7-8. Process LIVE (200) JS first: fetch, store, scan for secrets (100% coverage - ALL files)
             live_secrets = []
             if live_js_urls:
                 self.printer.info(f"Scanning {len(live_js_urls)} live JS files for secrets...")
-                important_live_js, non_important_live_js = self.js_filter.filter_important_js_files(live_js_urls)
-                results["important_live_js"] = important_live_js
-                results["non_important_live_js"] = non_important_live_js
-                
-                # Store important JS files (for reference)
-                stored_live_js = {}
-                if important_live_js:
-                    stored_live_js = await self.js_storage.fetch_and_store_live_js(important_live_js)
-                results["stored_live_js"] = stored_live_js
-                
-                # CRITICAL: Scan ALL live JS files for secrets
-                live_secrets = await self._scan_live_js_secrets(live_js_urls)
-                
-                # Send webhooks immediately for live JS secrets
-                for secret in live_secrets:
-                    await self._send_finding_webhook(secret)
-                    self.printer.finding(f"JS Secret: {secret.get('vulnerability_type', 'Unknown')} in {secret.get('url', 'N/A')}")
+                try:
+                    important_live_js, non_important_live_js = self.js_filter.filter_important_js_files(live_js_urls)
+                    results["important_live_js"] = important_live_js
+                    results["non_important_live_js"] = non_important_live_js
+                    
+                    # Store important JS files (for reference)
+                    stored_live_js = {}
+                    if important_live_js:
+                        self.printer.info(f"Storing {len(important_live_js)} important JS files...")
+                        stored_live_js = await self.js_storage.fetch_and_store_live_js(important_live_js)
+                    results["stored_live_js"] = stored_live_js
+                    
+                    # CRITICAL: Scan ALL live JS files for secrets
+                    self.printer.info(f"Fetching and scanning {len(live_js_urls)} live JS files...")
+                    live_secrets = await self._scan_live_js_secrets(live_js_urls)
+                    self.printer.success(f"Found {len(live_secrets)} secrets in live JS files")
+                    
+                    # Send webhooks immediately for live JS secrets
+                    for secret in live_secrets:
+                        await self._send_finding_webhook(secret)
+                        self.printer.finding(f"JS Secret: {secret.get('vulnerability_type', 'Unknown')} in {secret.get('url', 'N/A')}")
+                except Exception as e:
+                    self.logger.error(f"Error processing live JS files: {e}")
+                    self.printer.error(f"Error scanning live JS: {e}")
+            else:
+                self.printer.info("No live JS files to scan")
             results["live_secrets"] = live_secrets
             
             # 9-10. Then process DEAD (404) JS via Wayback Archive
             archived_secrets = []
             if dead_js_urls:
                 self.printer.info(f"Checking {len(dead_js_urls)} dead JS files via Wayback...")
-                archived_secrets = await self._analyze_archived_js(dead_js_urls)
-                # Send webhooks immediately for archived secrets
-                for secret in archived_secrets:
-                    await self._send_finding_webhook(secret)
-                    self.printer.finding(f"Archived JS Secret: {secret.get('vulnerability_type', 'Unknown')} in {secret.get('url', 'N/A')}")
+                try:
+                    archived_secrets = await self._analyze_archived_js(dead_js_urls)
+                    self.printer.success(f"Found {len(archived_secrets)} secrets in archived JS files")
+                    # Send webhooks immediately for archived secrets
+                    for secret in archived_secrets:
+                        await self._send_finding_webhook(secret)
+                        self.printer.finding(f"Archived JS Secret: {secret.get('vulnerability_type', 'Unknown')} in {secret.get('url', 'N/A')}")
+                except Exception as e:
+                    self.logger.error(f"Error processing archived JS files: {e}")
+                    self.printer.error(f"Error scanning archived JS: {e}")
+            else:
+                self.printer.info("No dead JS files to check via Wayback")
             results["archived_secrets"] = archived_secrets
             
             # Store all found secrets (live + archived)
@@ -177,45 +228,101 @@ class ReconFramework:
             
             # ENV File Scanning Phase
             self.printer.phase("ENV Phase", target)
-            env_findings = await self.env_scanner.scan_multiple_targets(live_hosts)
-            results["env_findings"] = env_findings
-            total_env = sum(len(f) for f in env_findings.values())
-            if total_env > 0:
-                self.printer.count("ENV files exposed", total_env, self.printer.RED)
-                # Send webhooks immediately for ENV findings
-                for host, findings in env_findings.items():
-                    for finding in findings:
-                        finding_dict = {
-                            "target": host,
-                            "module": "ENV Scanner",
-                            "url": finding["url"],
-                            "vulnerability_type": "Environment File Exposure",
-                            "severity": finding["severity"],
-                            "evidence": f"Exposed .env file with {len(finding['secrets'])} secrets"
-                        }
-                        await self._send_finding_webhook(finding_dict)
-                        self.printer.finding(f"ENV Exposure: {finding['url']}")
+            if live_hosts:
+                self.printer.info(f"Scanning {len(live_hosts)} live hosts for .env files...")
+                try:
+                    env_findings = await self.env_scanner.scan_multiple_targets(live_hosts)
+                    results["env_findings"] = env_findings
+                    total_env = sum(len(f) for f in env_findings.values())
+                    if total_env > 0:
+                        self.printer.count("ENV files exposed", total_env, self.printer.RED)
+                        # Send webhooks immediately for ENV findings
+                        for host, findings in env_findings.items():
+                            for finding in findings:
+                                finding_dict = {
+                                    "target": host,
+                                    "module": "ENV Scanner",
+                                    "url": finding["url"],
+                                    "vulnerability_type": "Environment File Exposure",
+                                    "severity": finding["severity"],
+                                    "evidence": f"Exposed .env file with {len(finding['secrets'])} secrets"
+                                }
+                                await self._send_finding_webhook(finding_dict)
+                                self.printer.finding(f"ENV Exposure: {finding['url']}")
+                    else:
+                        self.printer.info("No .env files exposed")
+                except Exception as e:
+                    self.logger.error(f"Error scanning ENV files: {e}")
+                    self.printer.error(f"Error in ENV scan: {e}")
+                    results["env_findings"] = {}
+            else:
+                self.printer.info("No live hosts to scan for ENV")
+                results["env_findings"] = {}
             
             # Git Exposure Scanning Phase
             self.printer.phase("GIT Phase", target)
-            git_findings = await self.git_scanner.scan_multiple_targets(live_hosts)
-            results["git_findings"] = git_findings
-            total_git = sum(len(f) for f in git_findings.values())
-            if total_git > 0:
-                self.printer.count("Git repos exposed", total_git, self.printer.RED)
-                # Send webhooks immediately for Git findings
-                for host, findings in git_findings.items():
-                    for finding in findings:
-                        finding_dict = {
-                            "target": host,
-                            "module": "Git Scanner",
-                            "url": finding["url"],
-                            "vulnerability_type": "Git Repository Exposure",
-                            "severity": finding["severity"],
-                            "evidence": finding["evidence"]
-                        }
-                        await self._send_finding_webhook(finding_dict)
-                        self.printer.finding(f"Git Exposure: {finding['url']}")
+            if live_hosts:
+                self.printer.info(f"Scanning {len(live_hosts)} live hosts for .git repos...")
+                try:
+                    git_findings = await self.git_scanner.scan_multiple_targets(live_hosts)
+                    results["git_findings"] = git_findings
+                    total_git = sum(len(f) for f in git_findings.values())
+                    if total_git > 0:
+                        self.printer.count("Git repos exposed", total_git, self.printer.RED)
+                        # Send webhooks immediately for Git findings
+                        for host, findings in git_findings.items():
+                            for finding in findings:
+                                finding_dict = {
+                                    "target": host,
+                                    "module": "Git Scanner",
+                                    "url": finding["url"],
+                                    "vulnerability_type": "Git Repository Exposure",
+                                    "severity": finding["severity"],
+                                    "evidence": finding["evidence"]
+                                }
+                                await self._send_finding_webhook(finding_dict)
+                                self.printer.finding(f"Git Exposure: {finding['url']}")
+                    else:
+                        self.printer.info("No .git repos exposed")
+                except Exception as e:
+                    self.logger.error(f"Error scanning Git repos: {e}")
+                    self.printer.error(f"Error in Git scan: {e}")
+                    results["git_findings"] = {}
+            else:
+                self.printer.info("No live hosts to scan for Git")
+                results["git_findings"] = {}
+
+            # CORS Phase
+            self.printer.phase("CORS Phase", target)
+            if live_hosts:
+                self.printer.info(f"Scanning {len(live_hosts)} live hosts for CORS misconfig...")
+                try:
+                    cors_findings = await self.cors_scanner.scan_multiple_urls(live_hosts)
+                    results["cors_findings"] = cors_findings
+                    total_cors = sum(len(f) for f in cors_findings.values())
+                    if total_cors > 0:
+                        self.printer.count("CORS misconfigs", total_cors, self.printer.RED)
+                        for url, findings in cors_findings.items():
+                            for finding in findings:
+                                finding_dict = {
+                                    "target": url,
+                                    "module": "CORS Scanner",
+                                    "url": url,
+                                    "vulnerability_type": "CORS Misconfiguration",
+                                    "severity": finding.get("severity", "MEDIUM"),
+                                    "evidence": finding.get("evidence", ""),
+                                }
+                                await self._send_finding_webhook(finding_dict)
+                                self.printer.finding(f"CORS: {url} ({finding.get('misconfiguration_type', 'unknown')})")
+                    else:
+                        self.printer.info("No CORS misconfigurations found")
+                except Exception as e:
+                    self.logger.error(f"Error scanning CORS: {e}")
+                    self.printer.error(f"Error in CORS scan: {e}")
+                    results["cors_findings"] = {}
+            else:
+                self.printer.info("No live hosts to scan for CORS")
+                results["cors_findings"] = {}
             
             # Process and log all findings
             all_findings = await self._process_all_findings(results)
@@ -309,46 +416,51 @@ class ReconFramework:
             return live_secrets
         
         try:
-            # Fetch ALL live JS content (concurrent but rate-limited)
+            # Fetch ALL live JS content (concurrent but rate-limited) and show per-URL progress
             semaphore = asyncio.Semaphore(self.threads)
             fetched_count = 0
             failed_count = 0
-            
+
             async def fetch_js_content(url: str) -> tuple:
                 async with semaphore:
                     try:
                         response = await self.rate_limiter.get(url, timeout=10)
                         if response and response.status == 200:
+                            # This reads the full JS code into memory (as requested)
                             content = await response.text()
                             return url, content, None
                         return url, None, f"Status {response.status if response else 'None'}"
                     except Exception as e:
                         return url, None, str(e)
-            
-            tasks = [fetch_js_content(url) for url in live_js_urls]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            # Collect all successfully fetched content
+
+            tasks = [asyncio.create_task(fetch_js_content(url)) for url in live_js_urls]
+
             js_contents = []
-            for result in results:
-                if isinstance(result, Exception):
-                    failed_count += 1
-                    self.logger.debug(f"Failed to fetch JS file: {result}")
-                    continue
+            completed = 0
+            total = len(tasks)
+
+            for fut in asyncio.as_completed(tasks):
+                result = await fut
+                completed += 1
                 url, content, error = result
+
+                # One-line progress update (won't spam)
+                self.printer.progress(f"Scanning ({completed}/{total}) {url}")
+
                 if content:
                     js_contents.append((url, content))
                     fetched_count += 1
-                elif error:
+                else:
                     failed_count += 1
-                    self.logger.debug(f"Failed to fetch {url}: {error}")
-            
-            self.logger.info(f"Fetched {fetched_count}/{len(live_js_urls)} live JS files (failed: {failed_count})")
-            
+                    if error:
+                        self.logger.debug(f"Failed to fetch {url}: {error}")
+
+            self.printer.progress_done(f"JS fetch done: {fetched_count}/{len(live_js_urls)} (failed {failed_count})")
+
             # Scan ALL fetched content for secrets (no skipping)
             if js_contents:
                 scan_results = self.secret_scanner.scan_multiple_files(js_contents)
-                
+
                 for url, secrets in scan_results.items():
                     for secret in secrets:
                         live_secrets.append({
@@ -527,27 +639,6 @@ class ReconFramework:
         
         return all_results
     
-    async def _collect_urls_with_progress(self, live_hosts: List[str]) -> Dict[str, List[str]]:
-        """Collect URLs with progress indication for each tool"""
-        url_results = {}
-        
-        for host in live_hosts:
-            self.printer.tool_running("gau")
-            gau_urls = await self.url_collector.collect_urls_gau(host)
-            self.printer.tool_done("gau", len(gau_urls))
-            
-            self.printer.tool_running("waybackurls")
-            wayback_urls = await self.url_collector.collect_urls_waybackurls(host)
-            self.printer.tool_done("waybackurls", len(wayback_urls))
-            
-            self.printer.tool_running("katana")
-            katana_urls = await self.url_collector.collect_urls_katana(host)
-            self.printer.tool_done("katana", len(katana_urls))
-            
-            all_host_urls = gau_urls + wayback_urls + katana_urls
-            url_results[host] = all_host_urls
-        
-        return url_results
 
 async def main():
     """Main entry point"""
