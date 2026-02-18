@@ -1,0 +1,90 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+.env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project specific
+output/
+tmp/
+*.log
+*.db
+*.sqlite
+*.sqlite3
+
+# Configuration with secrets
+# config/config.py  # Temporarily allowed for user webhook configuration
+
+# Results and reports
+*.json
+*.csv
+*.txt
+!requirements.txt
+!targets.txt
+!README.md
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# Test files
+test_*
+*_test.py
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Documentation
+docs/_build/
+site/
+
+# Security
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
