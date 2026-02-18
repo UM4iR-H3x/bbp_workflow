@@ -34,6 +34,7 @@ from modules.env_scanner import get_env_scanner
 from modules.git_scanner import get_git_scanner
 from modules.cors_scanner import get_cors_scanner
 from modules.logger import get_result_logger
+from modules.js_storage import get_js_storage
 from modules.notifier import get_discord_notifier
 from modules.cleanup import get_cleanup_manager
 
@@ -62,6 +63,7 @@ class ReconFramework:
         self.git_scanner = get_git_scanner()
         self.cors_scanner = get_cors_scanner()
         self.result_logger = get_result_logger()
+        self.js_storage = get_js_storage()
         self.discord_notifier = get_discord_notifier()
         self.cleanup_manager = get_cleanup_manager()
         self.rate_limiter = get_rate_limiter()
@@ -142,12 +144,20 @@ class ReconFramework:
                 archived_secrets = await self._analyze_archived_js(dead_js_urls)
                 results["archived_secrets"] = archived_secrets
             
-            # 10. Live JS Importance Filtering
-            self.logger.info("Step 10: Live JS Importance Filtering")
+            # 10. Live JS Importance Filtering & Storage
+            self.logger.info("Step 10: Live JS Importance Filtering & Storage")
             live_js_urls = [url for url in js_urls if url not in dead_js_urls]
             important_live_js, non_important_live_js = self.js_filter.filter_important_js_files(live_js_urls)
+            
+            # Store important live JS files
+            stored_live_js = {}
+            if important_live_js:
+                stored_live_js = await self.js_storage.fetch_and_store_live_js(important_live_js)
+                self.logger.info(f"Stored {len(stored_live_js)} live JS files")
+            
             results["important_live_js"] = important_live_js
             results["non_important_live_js"] = non_important_live_js
+            results["stored_live_js"] = stored_live_js
             
             # 11. Live JS Secret Scanning (only important files)
             live_secrets = []
@@ -158,6 +168,11 @@ class ReconFramework:
             else:
                 self.logger.info("Step 11: Live JS Secret Scanning - No important JS files to scan")
                 results["live_secrets"] = []
+            
+            # Store all found secrets
+            all_secrets = archived_secrets + live_secrets
+            if all_secrets:
+                self.js_storage.store_secrets(all_secrets)
             
             # 12. ENV File Scanning
             self.logger.info("Step 12: Environment File Scanning")
@@ -224,9 +239,17 @@ class ReconFramework:
                 # Filter JS snapshots and scan for secrets
                 js_snapshots = self.archive_fetcher.filter_js_snapshots(snapshots)
                 
+                # Store archived JS files
                 for snapshot in js_snapshots:
                     content = self.archive_fetcher.extract_js_content(snapshot)
                     if content:
+                        await self.js_storage.store_archived_js_file(
+                            url, 
+                            snapshot["timestamp"], 
+                            content, 
+                            snapshot["snapshot_url"]
+                        )
+                        
                         secrets = self.secret_scanner.scan_content(content, snapshot["snapshot_url"])
                         
                         for secret in secrets:

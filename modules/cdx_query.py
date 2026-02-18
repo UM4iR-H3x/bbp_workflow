@@ -21,7 +21,7 @@ class CDXQuery:
         self.rate_limiter = get_rate_limiter()
         self.cdx_url = WAYBACK_CDX_URL
     
-    async def query_cdx(self, url: str, limit: int = 100) -> List[Dict[str, Any]]:
+    async def query_cdx(self, url: str, limit: int = 200) -> List[Dict[str, Any]]:
         """
         Query Wayback CDX API for archived versions of a URL
         
@@ -36,8 +36,8 @@ class CDXQuery:
             # Encode URL for query
             encoded_url = quote(url, safe='')
             
-            # Build CDX query URL
-            query_url = f"{self.cdx_url}?url={encoded_url}&output=json&limit={limit}"
+            # Build CDX query URL with more parameters for better results
+            query_url = f"{self.cdx_url}?url={encoded_url}&output=json&limit={limit}&filter=statuscode:200&filter=statuscode:404&collapse=timestamp:8"
             
             self.logger.debug(f"Querying CDX for URL: {url}")
             
@@ -136,7 +136,7 @@ class CDXQuery:
             log_error(self.logger, "CDX Query", "multiple", str(e))
             return {}
     
-    def filter_entries_by_status(self, entries: List[Dict[str, Any]], status_codes: List[int] = None) -> List[Dict[str, Any]]:
+    def filter_entries_by_status(self, entries: List[Dict[str, Any]], status_codes: List[int] = None, include_404s: bool = True) -> List[Dict[str, Any]]:
         """
         Filter CDX entries by HTTP status codes
         
@@ -148,7 +148,12 @@ class CDXQuery:
             Filtered list of entries
         """
         if status_codes is None:
-            return entries
+            # By default, include both 200 and 404 for wayback analysis
+            if include_404s:
+                filtered = [entry for entry in entries if entry.get('statuscode') in ['200', '404']]
+            else:
+                filtered = [entry for entry in entries if entry.get('statuscode') == '200']
+            return filtered
         
         filtered = []
         

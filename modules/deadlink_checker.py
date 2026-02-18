@@ -19,7 +19,7 @@ class DeadLinkChecker:
         self.logger = get_logger()
         self.rate_limiter = get_rate_limiter()
         
-        # Status codes that indicate a dead link
+        # Status codes that indicate a dead link (expanded for better detection)
         self.dead_status_codes = {
             400,  # Bad Request
             401,  # Unauthorized
@@ -35,6 +35,11 @@ class DeadLinkChecker:
             502,  # Bad Gateway
             503,  # Service Unavailable
             504,  # Gateway Timeout
+            520,  # Unknown Error (Cloudflare)
+            521,  # Web Server Is Down (Cloudflare)
+            522,  # Connection Timed Out (Cloudflare)
+            523,  # Origin Is Unreachable (Cloudflare)
+            524,  # A Timeout Occurred (Cloudflare)
         }
     
     async def check_url_status(self, url: str) -> Tuple[bool, int, str]:
@@ -58,6 +63,13 @@ class DeadLinkChecker:
             
             # Check if status code indicates a dead link
             is_dead = status_code in self.dead_status_codes
+            
+            # Additional check for some edge cases
+            if not is_dead and status_code == 200:
+                # Check content length to detect empty responses
+                content_length = response.headers.get('content-length', '0')
+                if content_length == '0':
+                    return True, status_code, "Empty response"
             
             return is_dead, status_code, ""
             

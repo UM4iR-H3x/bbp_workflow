@@ -14,10 +14,10 @@ CONFIG_DIR = PROJECT_ROOT / "config"
 OUTPUT_DIR = PROJECT_ROOT / "output"
 TMP_DIR = PROJECT_ROOT / "tmp"
 
-# Rate limiting settings
-DEFAULT_DELAY = (2, 5)  # Random delay between 2-5 seconds
-MAX_CONCURRENT_REQUESTS = 3
-REQUEST_TIMEOUT = 30
+# Rate limiting settings (more aggressive for better results)
+DEFAULT_DELAY = (1, 3)  # Random delay between 1-3 seconds
+MAX_CONCURRENT_REQUESTS = 5  # Increased from 3
+REQUEST_TIMEOUT = 20  # Decreased from 30
 MAX_RETRIES = 3
 BACKOFF_FACTOR = 2
 
@@ -65,15 +65,30 @@ SECRET_PATTERNS = {
     }
 }
 
-# Environment file paths to check
+# Environment file paths to check (expanded)
 ENV_PATHS = [
     "/.env",
     "/.env.backup",
     "/.env.old",
     "/.env.dev",
     "/.env.production",
+    "/.env.prod",
+    "/.env.local",
+    "/.env.development",
+    "/.env.staging",
+    "/.env.test",
+    "/.env.sample",
     "/api/.env",
-    "/config/.env"
+    "/config/.env",
+    "/admin/.env",
+    "/backend/.env",
+    "/app/.env",
+    "/src/.env",
+    "/public/.env",
+    "/vendor/.env",
+    "/storage/.env",
+    "/var/.env",
+    "/etc/.env"
 ]
 
 # CORS test origins

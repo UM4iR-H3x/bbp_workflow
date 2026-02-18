@@ -35,7 +35,11 @@ class GitScanner:
             "/.git/packed-refs",
             "/.git/refs/heads/master",
             "/.git/refs/heads/main",
-            "/.git/refs/remotes/origin/HEAD"
+            "/.git/refs/remotes/origin/HEAD",
+            "/.git/index",
+            "/.git/logs/HEAD",
+            "/.git/logs/refs/heads/master",
+            "/.git/logs/refs/heads/main"
         ]
         
         # Patterns for sensitive information in git files
@@ -94,7 +98,12 @@ class GitScanner:
             # First check if .git/HEAD is accessible
             head_url = urljoin(base_url + '/', '.git/HEAD')
             
-            if not await self._check_git_head(head_url):
+            # Try multiple approaches
+            if await self._check_git_head(head_url):
+                pass  # Standard .git/HEAD works
+            elif await self._check_git_head_alternative(base_url):
+                pass  # Alternative method works
+            else:
                 return []
             
             # .git repository is exposed, gather more information
@@ -137,6 +146,44 @@ class GitScanner:
                 content = await response.text()
                 # Check if it looks like a valid git HEAD file
                 return "ref:" in content or content.strip().startswith("ref:")
+            
+            return False
+            
+        except Exception:
+            return False
+    
+    async def _check_git_head_alternative(self, base_url: str) -> bool:
+        """
+        Alternative method to check for .git exposure
+        
+        Args:
+            base_url: Base URL to check
+            
+        Returns:
+            True if .git repository is exposed
+        """
+        try:
+            # Try checking other git files that might be accessible
+            test_files = [
+                "/.git/config",
+                "/.git/description", 
+                "/.git/index"
+            ]
+            
+            for file_path in test_files:
+                file_url = urljoin(base_url + '/', file_path.lstrip('/'))
+                response = await self.rate_limiter.get(file_url, timeout=5)
+                
+                if response and response.status == 200:
+                    content = await response.text()
+                    
+                    # Check if it looks like valid git content
+                    if "config" in file_path and ("[core]" in content or "[remote" in content):
+                        return True
+                    elif "description" in file_path and len(content.strip()) > 0:
+                        return True
+                    elif "index" in file_path and len(content) > 10:  # Index files are binary-ish
+                        return True
             
             return False
             

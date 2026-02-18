@@ -75,6 +75,23 @@ class EnvScanner:
             r"(?i)replace_with_.*",
             r"(?i)change_this"
         ]
+        
+        # Additional paths to check
+        self.additional_env_paths = [
+            "/.env.local",
+            "/.env.development", 
+            "/.env.staging",
+            "/.env.backup",
+            "/.env.old",
+            "/.env.sample",
+            "/config/.env",
+            "/api/.env",
+            "/admin/.env",
+            "/backend/.env",
+            "/app/.env",
+            "/src/.env",
+            "/public/.env"
+        ]
     
     async def scan_base_url(self, base_url: str) -> List[Dict[str, Any]]:
         """
@@ -102,7 +119,8 @@ class EnvScanner:
             
             # Build all possible .env URLs
             env_urls = []
-            for path in self.env_paths:
+            all_paths = self.env_paths + self.additional_env_paths
+            for path in all_paths:
                 env_url = urljoin(base_url + '/', path.lstrip('/'))
                 env_urls.append(env_url)
             
@@ -211,7 +229,7 @@ class EnvScanner:
                 fake_matches += 1
         
         # Must have real content patterns and not too many fake ones
-        return real_matches >= 2 and fake_matches <= 1
+        return real_matches >= 1 and fake_matches <= 2
     
     def _extract_secrets(self, content: str) -> List[Dict[str, Any]]:
         """
@@ -251,7 +269,7 @@ class EnvScanner:
                                 value = value[1:-1]
                             
                             # Skip if value is too short or looks fake
-                            if len(value) < 8 or self._is_fake_secret(value):
+                            if len(value) < 6 or self._is_fake_secret(value):
                                 continue
                             
                             secret = {
