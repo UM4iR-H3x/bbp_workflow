@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 from utils.logger import get_logger, log_module_start, log_module_complete, log_error
 from utils.rate_limiter import get_rate_limiter
+from utils.helpers import safe_filename
 from config.config import OUTPUT_DIR, MAX_CONCURRENT_REQUESTS
 
 class JSFileStorage:
@@ -27,9 +28,10 @@ class JSFileStorage:
         self.live_js_dir = self.js_storage_dir / "live"
         self.archived_js_dir = self.js_storage_dir / "archived"
         self.secrets_dir = OUTPUT_DIR / "js_secrets"
+        self.js_urls_list_dir = OUTPUT_DIR / "js_urls"
         
         # Create directories if they don't exist
-        for dir_path in [self.js_storage_dir, self.live_js_dir, self.archived_js_dir, self.secrets_dir]:
+        for dir_path in [self.js_storage_dir, self.live_js_dir, self.archived_js_dir, self.secrets_dir, self.js_urls_list_dir]:
             dir_path.mkdir(parents=True, exist_ok=True)
         
         # Index file to track stored JS files
@@ -62,6 +64,32 @@ class JSFileStorage:
                 json.dump(self.js_index, f, indent=2)
         except Exception as e:
             self.logger.error(f"Error saving JS index: {e}")
+    
+    def save_js_urls_to_txt(self, urls: List[str], target: str) -> Optional[str]:
+        """
+        Write all unique JS URLs to a .txt file (one URL per line).
+        Used for recon so you have a single file of all JS URLs per target.
+        
+        Args:
+            urls: Deduplicated list of JS URLs
+            target: Target domain/URL (used for filename)
+            
+        Returns:
+            Path to the created file or None
+        """
+        if not urls:
+            return None
+        try:
+            safe_target = safe_filename(target.replace("https://", "").replace("http://", "").strip("/").split("/")[0] or "target")
+            out_file = self.js_urls_list_dir / f"{safe_target}_js_urls.txt"
+            with open(out_file, "w", encoding="utf-8") as f:
+                for u in sorted(set(urls)):
+                    f.write(u.strip() + "\n")
+            self.logger.info(f"Wrote {len(urls)} JS URLs to {out_file}")
+            return str(out_file)
+        except Exception as e:
+            log_error(self.logger, "JS Storage", "save_js_urls_txt", str(e))
+            return None
     
     def _get_safe_filename(self, url: str, timestamp: str = None) -> str:
         """Generate a safe filename from URL"""

@@ -13,7 +13,22 @@ from config.config import SECRET_PATTERNS
 
 class SecretScanner:
     """
-    Scan JavaScript files for secrets and sensitive information
+    Scan JavaScript files for secrets and sensitive information.
+    
+    Comprehensive coverage includes:
+    - API keys (AWS, GitHub, Slack, generic)
+    - JWT tokens
+    - Private keys (RSA, DSA, EC, OpenSSH, PGP)
+    - Database URLs (MongoDB, MySQL, PostgreSQL, Redis)
+    - Auth headers and tokens
+    - Certificates
+    - SSH keys
+    - Webhooks and callbacks
+    - Internal endpoints (.internal, .local, .dev, .staging, .test)
+    - High entropy strings (base64 encoded secrets)
+    - Passwords and credentials
+    
+    All patterns are scanned - nothing is skipped. False positives are filtered out.
     """
     
     def __init__(self):

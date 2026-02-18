@@ -18,7 +18,8 @@ from config.config import MAX_CONCURRENT_REQUESTS
 
 class GitScanner:
     """
-    Scan for exposed .git repositories and extract sensitive information
+    Scan for exposed .git repositories and extract sensitive information.
+    Only reports valid findings: confirmed .git/HEAD or git config content (no false positives).
     """
     
     def __init__(self):

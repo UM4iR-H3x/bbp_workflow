@@ -13,7 +13,8 @@ from config.config import ENV_PATHS, MAX_CONCURRENT_REQUESTS
 
 class EnvScanner:
     """
-    Scan for exposed .env files and environment variables
+    Scan for exposed .env files and environment variables.
+    Only reports valid findings: 200 response + real .env content + extracted secrets (no examples/fakes).
     """
     
     def __init__(self):
@@ -228,8 +229,8 @@ class EnvScanner:
             if re.search(pattern, content, re.IGNORECASE):
                 fake_matches += 1
         
-        # Must have real content patterns and not too many fake ones
-        return real_matches >= 1 and fake_matches <= 2
+        # Only report valid .env: must have real content and at most one fake indicator
+        return real_matches >= 1 and fake_matches <= 1
     
     def _extract_secrets(self, content: str) -> List[Dict[str, Any]]:
         """
