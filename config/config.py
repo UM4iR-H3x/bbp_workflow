@@ -138,7 +138,7 @@ SEVERITY_LEVELS = {
 
 # Output configuration
 RESULTS_FILE = OUTPUT_DIR / "results.json"
-MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB max file size
+MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB max file si
 
 # Archive.org settings
 WAYBACK_CDX_URL = "http://web.archive.org/cdx/search/cdx"
