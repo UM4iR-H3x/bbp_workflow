@@ -12,9 +12,7 @@ from .cdx_query import get_cdx_query
 from .timestamp_picker import get_timestamp_picker
 from .archive_fetcher import get_archive_fetcher
 from .secret_scanner import get_secret_scanner
-from .env_scanner import get_env_scanner
-from .git_scanner import get_git_scanner
-from .cors_scanner import get_cors_scanner
+from .js_scanner import JSScanner
 from .logger import get_result_logger
 from .notifier import get_discord_notifier
 from .cleanup import get_cleanup_manager
@@ -30,9 +28,7 @@ __all__ = [
     'get_timestamp_picker',
     'get_archive_fetcher',
     'get_secret_scanner',
-    'get_env_scanner',
-    'get_git_scanner',
-    'get_cors_scanner',
+    'JSScanner',
     'get_result_logger',
     'get_discord_notifier',
     'get_cleanup_manager'

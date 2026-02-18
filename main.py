@@ -31,9 +31,7 @@ from modules.cdx_query import get_cdx_query
 from modules.timestamp_picker import get_timestamp_picker
 from modules.archive_fetcher import get_archive_fetcher
 from modules.secret_scanner import get_secret_scanner
-from modules.env_scanner import get_env_scanner
-from modules.git_scanner import get_git_scanner
-from modules.cors_scanner import get_cors_scanner
+from modules.js_scanner import JSScanner
 from modules.logger import get_result_logger
 from modules.js_storage import get_js_storage
 from modules.notifier import get_discord_notifier
@@ -61,9 +59,7 @@ class ReconFramework:
         self.timestamp_picker = get_timestamp_picker()
         self.archive_fetcher = get_archive_fetcher()
         self.secret_scanner = get_secret_scanner()
-        self.env_scanner = get_env_scanner()
-        self.git_scanner = get_git_scanner()
-        self.cors_scanner = get_cors_scanner()
+        self.js_scanner = JSScanner()
         self.result_logger = get_result_logger()
         self.js_storage = get_js_storage()
         self.discord_notifier = get_discord_notifier()
@@ -226,105 +222,28 @@ class ReconFramework:
             if all_secrets:
                 self.js_storage.store_secrets(all_secrets)
             
-            # ENV File Scanning Phase
-            self.printer.phase("ENV Phase", target)
-            if live_hosts:
-                self.printer.info(f"Scanning {len(live_hosts)} live hosts for .env files...")
+            # JavaScript Scanning Phase
+            self.printer.phase("JS Scanner Phase", target)
+            if js_urls:
+                self.printer.info(f"Scanning {len(js_urls)} JavaScript files for secrets and vulnerabilities...")
                 try:
-                    env_findings = await self.env_scanner.scan_multiple_targets(live_hosts)
-                    results["env_findings"] = env_findings
-                    total_env = sum(len(f) for f in env_findings.values())
-                    if total_env > 0:
-                        self.printer.count("ENV files exposed", total_env, self.printer.RED)
-                        # Send webhooks immediately for ENV findings
-                        for host, findings in env_findings.items():
-                            for finding in findings:
-                                finding_dict = {
-                                    "target": host,
-                                    "module": "ENV Scanner",
-                                    "url": finding["url"],
-                                    "vulnerability_type": "Environment File Exposure",
-                                    "severity": finding["severity"],
-                                    "evidence": f"Exposed .env file with {len(finding['secrets'])} secrets"
-                                }
-                                await self._send_finding_webhook(finding_dict)
-                                self.printer.finding(f"ENV Exposure: {finding['url']}")
+                    js_results = await self.js_scanner.scan_urls(js_urls)
+                    results["js_scanner_findings"] = js_results
+                    total_js_findings = sum(len(r.findings) for r in js_results)
+                    if total_js_findings > 0:
+                        self.printer.count("JS findings", total_js_findings, self.printer.RED)
                     else:
-                        self.printer.info("No .env files exposed")
+                        self.printer.info("No secrets or vulnerabilities found in JS files")
                 except Exception as e:
-                    self.logger.error(f"Error scanning ENV files: {e}")
-                    self.printer.error(f"Error in ENV scan: {e}")
-                    results["env_findings"] = {}
+                    self.logger.error(f"Error scanning JS files: {e}")
+                    self.printer.error(f"Error in JS scan: {e}")
+                    results["js_scanner_findings"] = []
             else:
-                self.printer.info("No live hosts to scan for ENV")
-                results["env_findings"] = {}
+                self.printer.info("No JS files to scan")
+                results["js_scanner_findings"] = []
             
-            # Git Exposure Scanning Phase
-            self.printer.phase("GIT Phase", target)
-            if live_hosts:
-                self.printer.info(f"Scanning {len(live_hosts)} live hosts for .git repos...")
-                try:
-                    git_findings = await self.git_scanner.scan_multiple_targets(live_hosts)
-                    results["git_findings"] = git_findings
-                    total_git = sum(len(f) for f in git_findings.values())
-                    if total_git > 0:
-                        self.printer.count("Git repos exposed", total_git, self.printer.RED)
-                        # Send webhooks immediately for Git findings
-                        for host, findings in git_findings.items():
-                            for finding in findings:
-                                finding_dict = {
-                                    "target": host,
-                                    "module": "Git Scanner",
-                                    "url": finding["url"],
-                                    "vulnerability_type": "Git Repository Exposure",
-                                    "severity": finding["severity"],
-                                    "evidence": finding["evidence"]
-                                }
-                                await self._send_finding_webhook(finding_dict)
-                                self.printer.finding(f"Git Exposure: {finding['url']}")
-                    else:
-                        self.printer.info("No .git repos exposed")
-                except Exception as e:
-                    self.logger.error(f"Error scanning Git repos: {e}")
-                    self.printer.error(f"Error in Git scan: {e}")
-                    results["git_findings"] = {}
-            else:
-                self.printer.info("No live hosts to scan for Git")
-                results["git_findings"] = {}
-
-            # CORS Phase
-            self.printer.phase("CORS Phase", target)
-            if live_hosts:
-                self.printer.info(f"Scanning {len(live_hosts)} live hosts for CORS misconfig...")
-                try:
-                    cors_findings = await self.cors_scanner.scan_multiple_urls(live_hosts)
-                    results["cors_findings"] = cors_findings
-                    total_cors = sum(len(f) for f in cors_findings.values())
-                    if total_cors > 0:
-                        self.printer.count("CORS misconfigs", total_cors, self.printer.RED)
-                        for url, findings in cors_findings.items():
-                            for finding in findings:
-                                finding_dict = {
-                                    "target": url,
-                                    "module": "CORS Scanner",
-                                    "url": url,
-                                    "vulnerability_type": "CORS Misconfiguration",
-                                    "severity": finding.get("severity", "MEDIUM"),
-                                    "evidence": finding.get("evidence", ""),
-                                }
-                                await self._send_finding_webhook(finding_dict)
-                                self.printer.finding(f"CORS: {url} ({finding.get('misconfiguration_type', 'unknown')})")
-                    else:
-                        self.printer.info("No CORS misconfigurations found")
-                except Exception as e:
-                    self.logger.error(f"Error scanning CORS: {e}")
-                    self.printer.error(f"Error in CORS scan: {e}")
-                    results["cors_findings"] = {}
-            else:
-                self.printer.info("No live hosts to scan for CORS")
-                results["cors_findings"] = {}
-            
-            # Process and log all findings
+            # Final Results Summary
+            self.printer.phase("Results Summary", target)
             all_findings = await self._process_all_findings(results)
             results["all_findings"] = all_findings
             
@@ -510,40 +429,18 @@ class ReconFramework:
         for secret in results.get("live_secrets", []):
             all_findings.append(secret)
         
-        # Process ENV findings
-        for target, env_findings in results.get("env_findings", {}).items():
-            for finding in env_findings:
+        # Process JS Scanner findings
+        for js_result in results.get("js_scanner_findings", []):
+            for finding in js_result.findings:
                 all_findings.append({
-                    "target": target,
-                    "module": "ENV Scanner",
-                    "url": finding["url"],
-                    "vulnerability_type": "Environment File Exposure",
-                    "severity": finding["severity"],
-                    "evidence": f"Exposed .env file with {len(finding['secrets'])} secrets"
-                })
-        
-        # Process Git findings
-        for target, git_findings in results.get("git_findings", {}).items():
-            for finding in git_findings:
-                all_findings.append({
-                    "target": target,
-                    "module": "Git Scanner",
-                    "url": finding["url"],
-                    "vulnerability_type": "Git Repository Exposure",
-                    "severity": finding["severity"],
-                    "evidence": finding["evidence"]
-                })
-        
-        # Process CORS findings
-        for url, cors_findings in results.get("cors_findings", {}).items():
-            for finding in cors_findings:
-                all_findings.append({
-                    "target": url,
-                    "module": "CORS Scanner",
-                    "url": url,
-                    "vulnerability_type": "CORS Misconfiguration",
-                    "severity": finding["severity"],
-                    "evidence": finding["evidence"]
+                    "target": js_result.url,
+                    "module": "JS Scanner",
+                    "url": finding.url,
+                    "vulnerability_type": finding.type,
+                    "severity": finding.severity,
+                    "evidence": finding.matched_string,
+                    "line_number": finding.line_number,
+                    "context": finding.context
                 })
         
         # Remove duplicate findings
@@ -605,9 +502,7 @@ class ReconFramework:
             "non_important_live_js_files": len(results.get("non_important_live_js", [])),
             "archived_secrets": len(results.get("archived_secrets", [])),
             "live_secrets": len(results.get("live_secrets", [])),
-            "env_findings": sum(len(f) for f in results.get("env_findings", {}).values()),
-            "git_findings": sum(len(f) for f in results.get("git_findings", {}).values()),
-            "cors_findings": sum(len(f) for f in results.get("cors_findings", {}).values()),
+            "js_scanner_findings": sum(len(r.findings) for r in results.get("js_scanner_findings", [])),
             "total_findings": len(results.get("all_findings", []))
         }
         

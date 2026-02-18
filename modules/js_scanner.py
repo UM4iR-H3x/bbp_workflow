@@ -198,9 +198,6 @@ class JSSecretDetector:
                             context=line.strip()
                         )
                         findings.append(finding)
-                        
-                        # Report secret immediately
-                        asyncio.create_task(self._report_secret_immediately(finding))
         
         return findings
     
@@ -254,57 +251,6 @@ class JSSecretDetector:
             return "LOW"
 
 
-class JSEndpointDetector:
-    """Phase 6.2: Endpoint detection in JS content"""
-    
-    ENDPOINT_PATTERNS = [
-        r'["\']([^"\']*(?:api|endpoint|route|service|server)[^"\']*)["\']',
-        r'["\']([^"\']*/(v\d+|api|admin|user|auth|data|config)[^"\']*)["\']',
-        r'url\s*[:=]\s*["\']([^"\']+)["\']',
-        r'endpoint\s*[:=]\s*["\']([^"\']+)["\']',
-        r'fetch\s*\(\s*["\']([^"\']+)["\']',
-        r'\.get\s*\(\s*["\']([^"\']+)["\']',
-        r'\.post\s*\(\s*["\']([^"\']+)["\']'
-    ]
-    
-    def detect_endpoints(self, content: str, url: str) -> List[JSFinding]:
-        """Extract endpoints from JS content"""
-        findings = []
-        lines = content.split('\n')
-        
-        for pattern in self.ENDPOINT_PATTERNS:
-            for line_num, line in enumerate(lines, 1):
-                matches = re.finditer(pattern, line, re.IGNORECASE)
-                for match in matches:
-                    endpoint = match.group(1)
-                    if self._is_valid_endpoint(endpoint):
-                        findings.append(JSFinding(
-                            url=url,
-                            type="endpoint",
-                            severity="MEDIUM",
-                            matched_string=endpoint,
-                            line_number=line_num,
-                            context=line.strip()
-                        ))
-        
-        return findings
-    
-    def _is_valid_endpoint(self, endpoint: str) -> bool:
-        """Validate if string is actually an endpoint"""
-        # Skip obvious non-endpoints
-        skip_patterns = [
-            r'^http[s]?://',  # Full URLs are handled elsewhere
-            r'^\w+$',  # Single words
-            r'^\d+$',  # Numbers only
-            r'^[{}()\[\]]+$'  # Just brackets
-        ]
-        
-        for pattern in skip_patterns:
-            if re.match(pattern, endpoint):
-                return False
-        
-        # Should contain path-like structure
-        return '/' in endpoint or '.' in endpoint
 
 
 class JSSensitiveKeywordDetector:
@@ -485,7 +431,6 @@ class JSScanner:
             self.config.get('max_size', 1024 * 1024)
         )
         self.secret_detector = JSSecretDetector()
-        self.endpoint_detector = JSEndpointDetector()
         self.keyword_detector = JSSensitiveKeywordDetector()
         self.entropy_detector = JSEntropyDetector()
         
@@ -548,14 +493,16 @@ class JSScanner:
         """Scan a list of URLs with concurrency control"""
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
         
-        async def scan_with_semaphore(url: str):
+        async def scan_with_semaphore(url: str, index: int, total: int):
             async with semaphore:
+                # Show progress for each URL
+                self.logger.info(f"Scanning JS ({index+1}/{total}): {url}")
                 return await self._scan_single_url(url, priority)
         
-        # Add delay between requests
+        # Add delay between requests and track progress
         tasks = []
-        for url in urls:
-            tasks.append(scan_with_semaphore(url))
+        for i, url in enumerate(urls):
+            tasks.append(scan_with_semaphore(url, i, len(urls)))
             # Random delay
             delay = random.uniform(*DEFAULT_DELAY)
             await asyncio.sleep(delay)
@@ -611,7 +558,6 @@ class JSScanner:
                         # Phase 6: Scan Archived JS
                         findings = []
                         findings.extend(self.secret_detector.detect_secrets(content, url))
-                        findings.extend(self.endpoint_detector.detect_endpoints(content, url))
                         findings.extend(self.keyword_detector.detect_keywords(content, url))
                         findings.extend(self.entropy_detector.detect_high_entropy(content, url))
                         
@@ -660,7 +606,6 @@ class JSScanner:
                     # Phase 6: Content scanning
                     findings = []
                     findings.extend(self.secret_detector.detect_secrets(content, url))
-                    findings.extend(self.endpoint_detector.detect_endpoints(content, url))
                     findings.extend(self.keyword_detector.detect_keywords(content, url))
                     findings.extend(self.entropy_detector.detect_high_entropy(content, url))
                     

@@ -44,7 +44,7 @@ class RateLimiter:
             self.session = aiohttp.ClientSession(
                 timeout=timeout,
                 headers=headers,
-                connector=aiohttp.TCPConnector(limit=max_concurrent)
+                connector=aiohttp.TCPConnector(limit=self.max_concurrent)
             )
         return self.session
     
